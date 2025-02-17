@@ -1,14 +1,18 @@
 import { Roles } from "./Roles";
 import { Semestre } from "./Semestre";
 
-export interface User {
-    id: string;
+export type RegistrationRequest = {
     firstName: string;
     lastName: string;
     email: string;
+    password: string;
     role: Roles;
-    filieres?: string[];
+    // students
+    cne?: string;
+    filiereId?: number;
     semestre?: Semestre;
+    // professors
     isChef?: boolean;
-    chefFiliere?: string;
-  }
+    filiereIds?: number[];
+  };
+  

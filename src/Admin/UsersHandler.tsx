@@ -27,6 +27,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
 } from "@/components/ui/select";
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -49,88 +50,50 @@ import {
 } from "@/components/ui/popover";
 import { User } from "@/types/User";
 import { api } from "@/api";
-
+import { RegistrationRequest } from "@/types/RegistrationRequest";
+import { ReloadIcon } from "@radix-ui/react-icons";
+import { Roles } from "@/types/Roles";
+import { Semestre } from "@/types/Semestre";
 
 interface BackendUser {
   id: number;
   firstName: string;
   lastName: string;
   email: string;
-  roles: Array<{ name: string }>;
-  prof: {
+  roles: Array<{ name: Roles }>;
+  prof?: {
     filieres?: string[];
-    semestre?: string;
+    semestre?: Semestre;
     isChef?: boolean;
     chefFiliere?: string;
-  } | null;
+  };
 }
 
-const filieresOptions: string[] = [
-  "Informatique",
-  "Mathématiques",
-  "Physique",
-  "Chimie",
+interface FiliereOption {
+  id: number;
+  name: string;
+}
+
+const filieresOptions: FiliereOption[] = [
+  { id: 1, name: "Informatique" },
+  { id: 2, name: "Mathématiques" },
+  { id: 3, name: "Physique" },
+  { id: 4, name: "Chimie" },
 ];
-const semestreOptions = ["S1", "S2", "S3", "S4"];
+
+const semestreOptions = [Semestre.S1, Semestre.S2, Semestre.S3, Semestre.S4];
 
 export default function UsersHandler() {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedRole, setSelectedRole] = useState<User["role"]>("admin");
+  const [selectedRole, setSelectedRole] = useState<Roles>(Roles.ADMIN_APP);
   const [open, setOpen] = useState(false);
   const [isChef, setIsChef] = useState(false);
-  const [selectedFilieres, setSelectedFilieres] = useState<string[]>([]);
-  const [selectedSemestre, setSelectedSemestre] = useState("");
+  const [selectedFilieres, setSelectedFilieres] = useState<number[]>([]);
+  const [selectedSemestre, setSelectedSemestre] = useState<Semestre>();
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const backendUsers = await api.getUsers();
-        
-        const transformedUsers = backendUsers.map((user: BackendUser) => ({
-          id: user.id.toString(),
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          role: mapRole(user.roles[0]?.name),
-          filieres: user.prof?.filieres || [],
-          semestre: user.prof?.semestre || "",
-          isChef: user.prof?.isChef || false,
-          chefFiliere: user.prof?.chefFiliere || "",
-        }));
-        
-        setUsers(transformedUsers);
-      } catch (error) {
-        console.error("Error fetching users:", error);
-      }
-    };
-
-    fetchUsers();
-  }, []);
-
-  const mapRole = (backendRole: string): User["role"] => {
-    switch (backendRole) {
-      case "ADMIN_APP":
-        return "admin";
-      case "PROFESSEUR":
-        return "prof";
-      case "COORDONNATEUR":
-        return "coordinateur";
-      case "ETUDIANT":
-        return "etudiant";
-      default:
-        return "admin";
-    }
-  };
-
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    password: "",
-  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const filteredUsers = users.filter((user) =>
     `${user.firstName} ${user.lastName}`
@@ -138,27 +101,139 @@ export default function UsersHandler() {
       .includes(searchTerm.toLowerCase())
   );
 
-  const handleCreateUser = () => {
-    const newUser: User = {
-      id: Date.now().toString(),
-      ...formData,
-      role: selectedRole,
-      ...(selectedRole === "prof" && {
-        filieres: selectedFilieres,
+  const mapRoleToDisplay = (role: Roles): string => {
+    switch (role) {
+      case Roles.ADMIN_APP:
+        return "Admin";
+      case Roles.PROFESSEUR:
+        return "Prof";
+      case Roles.COORDONNATEUR:
+        return "Coordinateur";
+      case Roles.ETUDIANT:
+        return "Étudiant";
+      case Roles.ADMIN_ABSENCE:
+        return "Admin Absence";
+      case Roles.SECRETAIRE_GENERAL:
+        return "Secrétaire Général";
+      case Roles.CHEF_SCOLARITE:
+        return "Chef Scolarité";
+      default:
+        return "Admin";
+    }
+  };
+
+  const fetchUsersByRole = async (role: Roles) => {
+    try {
+      let response;
+      switch (role) {
+        case Roles.ADMIN_APP:
+          response = await api.getAdmins();
+          break;
+        case Roles.PROFESSEUR:
+          response = await api.getProfs();
+          break;
+        case Roles.COORDONNATEUR:
+          response = await api.getChefsFilieres();
+          break;
+        case Roles.ETUDIANT:
+          response = await api.getStudents();
+          break;
+        case Roles.ADMIN_ABSENCE:
+          response = await api.getAdminAbsence();
+          break;
+        case Roles.SECRETAIRE_GENERAL:
+          response = await api.getSecretaires();
+          break;
+        case Roles.CHEF_SCOLARITE:
+          response = await api.getChefScolarite();
+          break;
+        default:
+          response = await api.getAdmins();
+      }
+
+      const transformedUsers = response.map((user: BackendUser) => ({
+        id: user.id.toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: mapRoleToDisplay(user.roles[0]?.name),
+        filieres: user.prof?.filieres || [],
+        semestre: user.prof?.semestre,
+        isChef: user.prof?.isChef || false,
+        chefFiliere: user.prof?.chefFiliere || "",
+      }));
+
+      setUsers(transformedUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsersByRole(selectedRole);
+  }, [selectedRole]);
+
+  const [formData, setFormData] = useState<RegistrationRequest>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+    role: Roles.ADMIN_APP,
+  });
+
+  const handleCreateUser = async () => {
+    setIsSubmitting(true);
+
+    try {
+      const userData: RegistrationRequest = {
+        ...formData,
+        role: selectedRole,
+      };
+
+      if (selectedRole === Roles.PROFESSEUR) {
+        userData.filiereIds = selectedFilieres;
+        userData.isChef = isChef;
+      }
+
+      if (selectedRole === Roles.ETUDIANT) {
+        userData.semestre = selectedSemestre;
+      }
+
+      const response = await api.registerUser(userData);
+
+      const newUser: User = {
+        id: response.id.toString(),
+        firstName: response.firstName,
+        lastName: response.lastName,
+        email: response.email,
+        role: mapRoleToDisplay(response.role) as Roles,
+        filieres: filieresOptions
+          .filter((f) => selectedFilieres.includes(f.id))
+          .map((f) => f.name),
         semestre: selectedSemestre,
         isChef,
-        ...(isChef && { chefFiliere: selectedFilieres[0] }),
-      }),
-    };
-    setUsers([...users, newUser]);
-    setOpen(false);
-    resetForm();
+      };
+
+      setUsers([...users, newUser]);
+      setOpen(false);
+      resetForm();
+    } catch (error) {
+      console.log(error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
-    setFormData({ firstName: "", lastName: "", email: "", password: "" });
+    setFormData({
+      firstName: "",
+      lastName: "",
+      email: "",
+      password: "",
+      role: Roles.ADMIN_APP,
+    });
     setSelectedFilieres([]);
-    setSelectedSemestre("");
+    setSelectedSemestre(undefined);
     setIsChef(false);
   };
 
@@ -180,29 +255,37 @@ export default function UsersHandler() {
           />
           <Select
             value={selectedRole}
-            onValueChange={(value: User["role"]) => setSelectedRole(value)}
+            onValueChange={(value: Roles) => {
+              setSelectedRole(value);
+              fetchUsersByRole(value);
+            }}
           >
             <SelectTrigger className="w-48">
               <SelectValue placeholder="Rôle" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="prof">Prof</SelectItem>
-              <SelectTrigger value="coordinateur">Chef de filiere</SelectTrigger>
-              <SelectItem value="administrateur absence">
-                Administrateur Absence
-              </SelectItem>
-              <SelectItem value="secretaire general">
-                Secrétaire Général
-              </SelectItem>
-              <SelectItem value="chef service scolarite">
-                Chef Service Scolarité
-              </SelectItem>
+              <SelectGroup>
+                <SelectItem value={Roles.ADMIN_APP}>Admin</SelectItem>
+                <SelectItem value={Roles.PROFESSEUR}>Prof</SelectItem>
+                <SelectItem value={Roles.COORDONNATEUR}>
+                  Coordinateur
+                </SelectItem>
+                <SelectItem value={Roles.ETUDIANT}>Étudiant</SelectItem>
+                <SelectItem value={Roles.ADMIN_ABSENCE}>
+                  Admin Absence
+                </SelectItem>
+                <SelectItem value={Roles.SECRETAIRE_GENERAL}>
+                  Secrétaire Général
+                </SelectItem>
+                <SelectItem value={Roles.CHEF_SCOLARITE}>
+                  Chef Scolarité
+                </SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button>Crer Compte</Button>
+              <Button>Créer Compte</Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[600px]">
               <DialogHeader>
@@ -263,7 +346,7 @@ export default function UsersHandler() {
                     className="col-span-3"
                   />
                 </div>
-                {selectedRole === "prof" && (
+                {selectedRole === Roles.PROFESSEUR && (
                   <>
                     <div className="grid grid-cols-4 items-center gap-4">
                       <Label className="text-right">Filières</Label>
@@ -274,7 +357,13 @@ export default function UsersHandler() {
                             className="col-span-3 justify-start"
                           >
                             {selectedFilieres.length > 0
-                              ? selectedFilieres.join(", ")
+                              ? selectedFilieres
+                                  .map(
+                                    (id) =>
+                                      filieresOptions.find((f) => f.id === id)
+                                        ?.name
+                                  )
+                                  .join(", ")
                               : "Sélectionner des filières"}
                           </Button>
                         </PopoverTrigger>
@@ -288,24 +377,24 @@ export default function UsersHandler() {
                               <CommandGroup>
                                 {filieresOptions.map((filiere) => (
                                   <CommandItem
-                                    key={filiere}
-                                    value={filiere}
+                                    key={filiere.id}
+                                    value={filiere.id.toString()}
                                     onSelect={() => {
                                       setSelectedFilieres((prev) =>
-                                        prev.includes(filiere)
-                                          ? prev.filter((f) => f !== filiere)
-                                          : [...prev, filiere]
+                                        prev.includes(filiere.id)
+                                          ? prev.filter((f) => f !== filiere.id)
+                                          : [...prev, filiere.id]
                                       );
                                     }}
                                   >
                                     <div className="flex items-center space-x-2">
                                       <Checkbox
                                         checked={selectedFilieres.includes(
-                                          filiere
+                                          filiere.id
                                         )}
                                         className="mr-2"
                                       />
-                                      <span>{filiere}</span>
+                                      <span>{filiere.name}</span>
                                     </div>
                                   </CommandItem>
                                 ))}
@@ -319,7 +408,9 @@ export default function UsersHandler() {
                       <Label className="text-right">Semestre</Label>
                       <Select
                         value={selectedSemestre}
-                        onValueChange={setSelectedSemestre}
+                        onValueChange={(value) =>
+                          setSelectedSemestre(value as Semestre)
+                        }
                       >
                         <SelectTrigger className="col-span-3">
                           <SelectValue placeholder="Sélectionner semestre" />
@@ -345,20 +436,25 @@ export default function UsersHandler() {
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label className="text-right">Filière chef</Label>
                         <Select
-                          value={selectedFilieres[0]}
+                          value={selectedFilieres[0]?.toString()}
                           onValueChange={(value) =>
-                            setSelectedFilieres([value])
+                            setSelectedFilieres([Number(value)])
                           }
                         >
                           <SelectTrigger className="col-span-3">
                             <SelectValue placeholder="Sélectionner filière" />
                           </SelectTrigger>
                           <SelectContent>
-                            {selectedFilieres?.map((filiere) => (
-                              <SelectItem key={filiere} value={filiere}>
-                                {filiere}
-                              </SelectItem>
-                            ))}
+                            {selectedFilieres?.map((id) => {
+                              const filiere = filieresOptions.find(
+                                (f) => f.id === id
+                              );
+                              return (
+                                <SelectItem key={id} value={id.toString()}>
+                                  {filiere?.name}
+                                </SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                       </div>
@@ -367,7 +463,12 @@ export default function UsersHandler() {
                 )}
               </div>
               <DialogFooter>
-                <Button onClick={handleCreateUser}>Créer Compte</Button>
+                <Button onClick={handleCreateUser} disabled={isSubmitting}>
+                  {isSubmitting && (
+                    <ReloadIcon className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {isSubmitting ? "Création..." : "Créer Compte"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -412,7 +513,6 @@ export default function UsersHandler() {
         </Table>
       </CardContent>
 
-      {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -437,7 +537,6 @@ export default function UsersHandler() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Dialog */}
       {editingUser && (
         <Dialog
           open={!!editingUser}
@@ -447,7 +546,7 @@ export default function UsersHandler() {
             <DialogHeader>
               <DialogTitle>Modifier l'utilisateur</DialogTitle>
             </DialogHeader>
-            {/* Add edit form similar to create form with existing values */}
+            {/* Add edit form implementation here */}
           </DialogContent>
         </Dialog>
       )}
