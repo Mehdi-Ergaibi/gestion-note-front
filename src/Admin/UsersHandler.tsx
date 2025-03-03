@@ -54,6 +54,9 @@ import { RegistrationRequest } from "@/types/RegistrationRequest";
 import { ReloadIcon } from "@radix-ui/react-icons";
 import { Roles } from "@/types/Roles";
 import { Semestre } from "@/types/Semestre";
+import { useToast } from "@/hooks/use-toast";
+import { UserUpdateRequest } from "@/types/UserUpdateRequest";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface BackendUser {
   id: number;
@@ -92,8 +95,108 @@ export default function UsersHandler() {
   const [selectedFilieres, setSelectedFilieres] = useState<number[]>([]);
   const [selectedSemestre, setSelectedSemestre] = useState<Semestre>();
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [formData, setFormData] = useState<RegistrationRequest>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+    role: Roles.ADMIN_APP,
+  });
+
+  const { token, loading } = useAuth();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (editingUser) {
+      setFormData({
+        firstName: editingUser.firstName || "",
+        lastName: editingUser.lastName || "",
+        email: editingUser.email || "",
+        role: editingUser.role || "",
+        password: "",
+      });
+      const userRole = mapDisplayToRole(editingUser.role);
+      if (userRole === Roles.PROFESSEUR) {
+        const filiereIds = editingUser.filieres
+          ?.map(
+            (filiereName) =>
+              filieresOptions.find((opt) => opt.name === filiereName)?.id
+          )
+          .filter((id): id is number => id !== undefined);
+        setSelectedFilieres(filiereIds || []);
+        setSelectedSemestre(editingUser.semestre);
+        setIsChef(editingUser.isChef || false);
+      } else {
+        setSelectedFilieres([]);
+        setSelectedSemestre(undefined);
+        setIsChef(false);
+      }
+    }
+  }, [editingUser]);
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+
+    try {
+      setIsSubmitting(true);
+
+      const userRole = mapDisplayToRole(editingUser.role);
+
+      const updatedUser: Partial<UserUpdateRequest> = {
+        id: editingUser.id,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        roles: [userRole, ...(isChef ? [Roles.COORDONNATEUR] : [])],
+        ...(userRole === Roles.PROFESSEUR && {
+          prof: {
+            isChef: isChef,
+            filiereIds: selectedFilieres,
+          },
+        }),
+        password: formData.password || undefined,
+      };
+
+      await api.updateUser(updatedUser);
+      toast({
+        title: "Utilisateur modifié",
+        description: `${updatedUser.firstName} ${updatedUser.lastName} a été modifié avec succès.`,
+        variant: "success",
+      });
+      setEditingUser(null);
+      // Update local state (adjust based on API response)
+      setUsers((prevUsers) =>
+        prevUsers.map((user) =>
+          user.id === editingUser.id
+            ? ({
+                ...user,
+                firstName: updatedUser.firstName ?? user.firstName, // Ensure it's always a string
+                lastName: updatedUser.lastName ?? user.lastName,
+                email: updatedUser.email ?? user.email,
+                roles: updatedUser.roles as Roles[], // Ensure proper type casting
+                filieres: filieresOptions
+                  .filter((f) => selectedFilieres.includes(f.id))
+                  .map((f) => f.name),
+                semestre: selectedSemestre,
+                isChef: isChef,
+                chefFiliere: isChef
+                  ? filieresOptions.find((f) => f.id === selectedFilieres[0])
+                      ?.name
+                  : undefined,
+              } as User) // Explicitly cast to User
+            : user
+        )
+      );
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour :", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const filteredUsers = users.filter((user) =>
     `${user.firstName} ${user.lastName}`
@@ -109,8 +212,6 @@ export default function UsersHandler() {
         return "Prof";
       case Roles.COORDONNATEUR:
         return "Coordinateur";
-      case Roles.ETUDIANT:
-        return "Étudiant";
       case Roles.ADMIN_ABSENCE:
         return "Admin Absence";
       case Roles.SECRETAIRE_GENERAL:
@@ -119,6 +220,25 @@ export default function UsersHandler() {
         return "Chef Scolarité";
       default:
         return "Admin";
+    }
+  };
+
+  const mapDisplayToRole = (displayRole: string): Roles => {
+    switch (displayRole) {
+      case "Admin":
+        return Roles.ADMIN_APP;
+      case "Prof":
+        return Roles.PROFESSEUR;
+      case "Coordinateur":
+        return Roles.COORDONNATEUR;
+      case "Admin Absence":
+        return Roles.ADMIN_ABSENCE;
+      case "Secrétaire Général":
+        return Roles.SECRETAIRE_GENERAL;
+      case "Chef Scolarité":
+        return Roles.CHEF_SCOLARITE;
+      default:
+        return Roles.ADMIN_APP;
     }
   };
 
@@ -134,9 +254,6 @@ export default function UsersHandler() {
           break;
         case Roles.COORDONNATEUR:
           response = await api.getChefsFilieres();
-          break;
-        case Roles.ETUDIANT:
-          response = await api.getStudents();
           break;
         case Roles.ADMIN_ABSENCE:
           response = await api.getAdminAbsence();
@@ -170,16 +287,10 @@ export default function UsersHandler() {
   };
 
   useEffect(() => {
-    fetchUsersByRole(selectedRole);
-  }, [selectedRole]);
-
-  const [formData, setFormData] = useState<RegistrationRequest>({
-    firstName: "",
-    lastName: "",
-    email: "",
-    password: "",
-    role: Roles.ADMIN_APP,
-  });
+    if (!loading && token) {
+      fetchUsersByRole(selectedRole);
+    }
+  }, [selectedRole, token, loading]);
 
   const handleCreateUser = async () => {
     setIsSubmitting(true);
@@ -195,18 +306,18 @@ export default function UsersHandler() {
         userData.isChef = isChef;
       }
 
-      if (selectedRole === Roles.ETUDIANT) {
+      /* if (selectedRole === Roles.ETUDIANT) {
         userData.semestre = selectedSemestre;
-      }
+      } */
 
-      const response = await api.registerUser(userData);
+      await api.registerUser(userData);
 
       const newUser: User = {
-        id: response.id.toString(),
-        firstName: response.firstName,
-        lastName: response.lastName,
-        email: response.email,
-        role: mapRoleToDisplay(response.role) as Roles,
+        id: `temp-${Date.now()}`,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        role: mapRoleToDisplay(formData.role) as Roles,
         filieres: filieresOptions
           .filter((f) => selectedFilieres.includes(f.id))
           .map((f) => f.name),
@@ -214,10 +325,17 @@ export default function UsersHandler() {
         isChef,
       };
 
-      setUsers([...users, newUser]);
+      setUsers((prevUsers) => [...prevUsers, newUser]);
       setOpen(false);
       resetForm();
+
+      toast({
+        title: "Utilisateur ajouté",
+        description: `${newUser.firstName} ${newUser.lastName} a été ajouté avec succès.`,
+        variant: "success",
+      });
     } catch (error) {
+      setUsers((prev) => prev.filter((u) => !u.id.startsWith("temp-")));
       console.log(error);
     } finally {
       setIsSubmitting(false);
@@ -237,9 +355,22 @@ export default function UsersHandler() {
     setIsChef(false);
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((user) => user.id !== userId));
-    setDeleteDialogOpen(false);
+  const handleDeleteUser = async (email: string) => {
+    try {
+      console.log(email);
+      await api.deleteUser(email);
+      toast({
+        title: "Utilisateur supprimé avec succès",
+        description: `${deletingUser?.firstName} ${deletingUser?.lastName} a été supprimé avec succès.`,
+        variant: "success",
+      });
+      setDeleteDialogOpen(false);
+
+      // Refresh users list after deletion
+      setUsers(users.filter((user) => user.email !== email));
+    } catch (error) {
+      console.error("Erreur lors de la suppression de l'utilisateur:", error);
+    }
   };
 
   return (
@@ -270,7 +401,6 @@ export default function UsersHandler() {
                 <SelectItem value={Roles.COORDONNATEUR}>
                   Coordinateur
                 </SelectItem>
-                <SelectItem value={Roles.ETUDIANT}>Étudiant</SelectItem>
                 <SelectItem value={Roles.ADMIN_ABSENCE}>
                   Admin Absence
                 </SelectItem>
@@ -300,7 +430,11 @@ export default function UsersHandler() {
                     id="firstName"
                     value={formData.firstName}
                     onChange={(e) =>
-                      setFormData({ ...formData, firstName: e.target.value })
+                      setFormData({
+                        ...formData,
+                        firstName: e.target.value,
+                        role: selectedRole,
+                      })
                     }
                     className="col-span-3"
                   />
@@ -500,7 +634,10 @@ export default function UsersHandler() {
                         Modifier
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onClick={() => setDeleteDialogOpen(true)}
+                        onClick={() => {
+                          setDeleteDialogOpen(true);
+                          setDeletingUser(user);
+                        }}
                       >
                         Supprimer
                       </DropdownMenuItem>
@@ -529,7 +666,7 @@ export default function UsersHandler() {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => handleDeleteUser(editingUser?.id || "")}
+              onClick={() => handleDeleteUser(deletingUser?.email || "")}
             >
               Supprimer
             </Button>
@@ -546,7 +683,184 @@ export default function UsersHandler() {
             <DialogHeader>
               <DialogTitle>Modifier l'utilisateur</DialogTitle>
             </DialogHeader>
-            {/* Add edit form implementation here */}
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="firstName" className="text-right">
+                  Prénom
+                </Label>
+                <Input
+                  id="firstName"
+                  value={formData.firstName}
+                  onChange={(e) =>
+                    setFormData({ ...formData, firstName: e.target.value })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="lastName" className="text-right">
+                  Nom
+                </Label>
+                <Input
+                  id="lastName"
+                  value={formData.lastName}
+                  onChange={(e) =>
+                    setFormData({ ...formData, lastName: e.target.value })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="email" className="text-right">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  disabled
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="password" className="text-right">
+                  Nouveau mot de passe
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
+                  className="col-span-3"
+                />
+              </div>
+              {mapDisplayToRole(editingUser.role) === Roles.PROFESSEUR && (
+                <>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Filières</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="col-span-3 justify-start"
+                        >
+                          {selectedFilieres.length > 0
+                            ? selectedFilieres
+                                .map(
+                                  (id) =>
+                                    filieresOptions.find((f) => f.id === id)
+                                      ?.name
+                                )
+                                .join(", ")
+                            : "Sélectionner des filières"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0">
+                        <Command>
+                          <CommandInput placeholder="Rechercher filière..." />
+                          <CommandList>
+                            <CommandEmpty>Aucune filière trouvée.</CommandEmpty>
+                            <CommandGroup>
+                              {filieresOptions.map((filiere) => (
+                                <CommandItem
+                                  key={filiere.id}
+                                  value={filiere.id.toString()}
+                                  onSelect={() => {
+                                    setSelectedFilieres((prev) =>
+                                      prev.includes(filiere.id)
+                                        ? prev.filter((f) => f !== filiere.id)
+                                        : [...prev, filiere.id]
+                                    );
+                                  }}
+                                >
+                                  <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                      checked={selectedFilieres.includes(
+                                        filiere.id
+                                      )}
+                                      className="mr-2"
+                                    />
+                                    <span>{filiere.name}</span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Semestre</Label>
+                    <Select
+                      value={selectedSemestre}
+                      onValueChange={(value) =>
+                        setSelectedSemestre(value as Semestre)
+                      }
+                    >
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue placeholder="Sélectionner semestre" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {semestreOptions?.map((semestre) => (
+                          <SelectItem key={semestre} value={semestre}>
+                            {semestre}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right">Chef de filière</Label>
+                    <Checkbox
+                      checked={isChef}
+                      onCheckedChange={(checked) => setIsChef(!!checked)}
+                      className="col-span-3"
+                    />
+                  </div>
+                  {isChef && (
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label className="text-right">Filière chef</Label>
+                      <Select
+                        value={selectedFilieres[0]?.toString()}
+                        onValueChange={(value) =>
+                          setSelectedFilieres([Number(value)])
+                        }
+                      >
+                        <SelectTrigger className="col-span-3">
+                          <SelectValue placeholder="Sélectionner filière" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {selectedFilieres?.map((id) => {
+                            const filiere = filieresOptions.find(
+                              (f) => f.id === id
+                            );
+                            return (
+                              <SelectItem key={id} value={id.toString()}>
+                                {filiere?.name}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button onClick={handleUpdateUser} disabled={isSubmitting}>
+                {isSubmitting && (
+                  <ReloadIcon className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {isSubmitting ? "Modification..." : "Modifier"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

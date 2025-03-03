@@ -4,19 +4,22 @@ import { AutoLogout } from "./AutoLogOut";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { LoginForm } from "./LoginForm";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { setAuthInstance } from "./api";
 
 const AuthInitializer = () => {
   const auth = useAuth();
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("jwtToken");
-
-    if (storedToken && !auth.token) {
-      setAuthInstance(auth);
+    if (!initialized) {
+      const storedToken = localStorage.getItem("jwtToken");
+      if (storedToken && !auth.token) {
+        setAuthInstance(auth);
+      }
+      setInitialized(true);
     }
-  }, [auth.token]);
+  }, [initialized, auth]);
 
   return null;
 };

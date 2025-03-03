@@ -1,8 +1,11 @@
 import { AuthContextType } from "./contexts/AuthContext";
+import { Filiere } from "./types/Filiere";
 import { RegistrationRequest } from "./types/RegistrationRequest";
+import { Semestre } from "./types/Semestre";
+import { UserUpdateRequest } from "./types/UserUpdateRequest";
 const lhost = "http://localhost:8080";
 
-let auth: AuthContextType | null = null;
+let auth: AuthContextType;
 
 export const setAuthInstance = (authInstance: AuthContextType) => {
   auth = authInstance;
@@ -10,9 +13,9 @@ export const setAuthInstance = (authInstance: AuthContextType) => {
 
 export const api = {
   async request(url: string, options: RequestInit = {}) {
-    if (!auth) {
+    /*  if (!auth) {
       throw new Error("Auth instance not initialized");
-    }
+    } */
 
     const token = localStorage.getItem("jwtToken");
 
@@ -93,5 +96,81 @@ export const api = {
   },
   async getChefScolarite() {
     return this.request("/api/admin/chefs-scolarite");
+  },
+  async updateUser(userData: Partial<UserUpdateRequest>) {
+    console.log("Updating user:", userData);
+
+    const removeUndefineds = Object.fromEntries(
+      Object.entries(userData).filter(([_, v]) => v !== undefined)
+    );
+
+    return this.request("/api/admin/update-user", {
+      method: "POST",
+      body: JSON.stringify(removeUndefineds),
+    });
+  },
+  async deleteUser(email: string) {
+    console.log(email);
+    return this.request(`/api/admin/delete-user/${email}`, {
+      method: "DELETE",
+    });
+  },
+  async getConfiguration() {
+    return this.request("/api/admin/configuration", {
+      method: "GET",
+    });
+  },
+
+  async updateNormalExam(enabled: boolean) {
+    return this.request(
+      `/api/admin/configuration/normal-exam?enabled=${enabled}`,
+      {
+        method: "PUT",
+      }
+    );
+  },
+
+  async updateRattExam(enabled: boolean) {
+    return this.request(
+      `/api/admin/configuration/ratt-exam?enabled=${enabled}`,
+      {
+        method: "PUT",
+      }
+    );
+  },
+
+  async updateStudentNotesVisibility(enabled: boolean) {
+    return this.request(
+      `/api/admin/configuration/student-notes?enabled=${enabled}`,
+      {
+        method: "PUT",
+      }
+    );
+  },
+  async getFilieres(): Promise<Filiere[]> {
+    return this.request("/api/filieres");
+  },
+
+  async createFiliere(filiere: { name: string; semestre: Semestre }) {
+    return this.request("/api/filieres", {
+      method: "POST",
+      body: JSON.stringify(filiere),
+    });
+  },
+
+  async updateFiliere(
+    id: number,
+    filiere: { name: string; semestre: Semestre }
+  ) {
+    return this.request(`/api/filieres/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(filiere),
+    });
+  },
+
+  async deleteFiliere(id: number) {
+    return this.request(`/api/filieres/${id}`, {
+      method: "DELETE",
+    });
   },
 };
